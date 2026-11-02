@@ -213,3 +213,40 @@ before loading; the game's save change predates the gold test. Actual diving,
 combat, restaurant effects, populated jungle inventory writes and full XCTest
 execution remain unverified. Local debug-signature access may be reset by a
 Steam update or file verification.
+
+## Review Corrections (2026-11-02)
+
+The 2026-10-09 observations above are historical. Full diving, combat,
+restaurant and populated resource behavior is still pending player testing.
+All `.756` writes are now gated by an explicit, session-only experimental
+switch, off on every app launch. The operation service enforces the gate before
+preflight or resource access, including programmatic requests; code restoration
+remains allowed. `.675`, `.710` and unknown-build policies are unchanged.
+
+The Steam signing workflow now installs the exact already-verified signing
+payload on fresh inodes rather than independently re-signing the original.
+Before either file changes, it fsyncs and atomically publishes a recovery
+journal containing the original receipt and both permitted full manifests.
+Receipts are also written by fsync plus atomic replacement. Receipt persistence
+failure rolls the source back; a persistent storage failure retains the journal
+for recovery. Interrupted restore accepts only journaled per-file
+baseline/applied combinations, with all other assets unchanged. Unrecognized
+signing bytes, changed backups and unrelated Steam changes are rejected.
+Legacy applied receipts with independently signed hashes remain restorable.
+
+Keep `receipt.json.recovery.json` beside the receipt until recovery completes.
+After an interrupted operation, stop the game and run the usual `restore`
+command with the receipt path, even if the main receipt is missing or truncated.
+Recovery does not require the staged payload. It finalizes an atomic restored
+receipt before removing the journal; apply can then be retried normally.
+
+Local validation used complete Xcode and the same public XCTest command as CI:
+196 XCTest cases (one optional installed-game case skipped), zero failures;
+the three proprietary-installation test classes remain excluded as in CI.
+Ten Python tests pass, including native codesign/APFS fixture preparation,
+application, rollback and exact restoration; portable fault injection covers
+receipt writes, partial restore, abrupt process exits, legacy receipts and
+unrelated-change refusal. These checks use generated fixtures, not the user's
+game, and do not substitute for gameplay validation. CI now runs both Python
+and Swift tests on macOS for pushes as well as pull requests; upstream
+contributor approval remains a maintainer action.

@@ -34,7 +34,7 @@ but memory writes require an exact reviewed profile.
 | Package manager | Swift Package Manager |
 | Validated baseline build | `v1.0.6.675.mac` |
 | Evidence-backed partial build | `v1.0.6.710.mac` |
-| All-control profile, gameplay verification pending | `v1.0.6.756.mac` |
+| Experimental profile, writes gated by default | `v1.0.6.756.mac`; gameplay verification pending |
 | Target module | `GameAssembly.dylib` |
 | Manifest schema | `1.0` |
 | Test coverage | XCTest coverage for manifest policy, patch transactions, runtime incrementers, release scripts, and player path contracts |
@@ -79,7 +79,7 @@ portable across game updates.
 | --- | --- |
 | `v1.0.6.675.mac` | Full baseline profile |
 | `v1.0.6.710.mac` | 72 exact targets for god mode, oxygen, ammo, crab traps, weight, partial player speed, drones, stamina, and wasabi; other controls are disabled |
-| `v1.0.6.756.mac` | All 22 controls; 101 reviewed code targets plus version-specific currency and inventory paths; gameplay verification pending |
+| `v1.0.6.756.mac` | Experimental profile for all 22 controls; 101 reviewed code targets plus version-specific resource paths; writes gated by default |
 
 The `.710` targets are byte-verified against the reporter's GameAssembly and
 guarded by its exact UUID. They have not been behavior-tested on the maintainer's
@@ -89,7 +89,10 @@ behavior confirmation. See [the evidence note](docs/compatibility-v1.0.6.710.mac
 
 The `.756` profile exposes all 22 controls. Its 101 code target windows and RPG
 code cave match the local arm64 binary, and its resource layout follows the new
-metadata field offsets. Gameplay effects remain unverified. See [its evidence note](docs/compatibility-v1.0.6.756.mac.md).
+metadata field offsets. Back up saves, then explicitly enable **启用 .756 实验功能**
+in the app to allow writes. Consent resets on every launch and never bypasses
+exact build/module checks. Restoring code patches remains allowed. Full gameplay
+and populated resource effects remain unverified. See [its evidence note](docs/compatibility-v1.0.6.756.mac.md).
 
 Player memory writes require the manifest's exact bundle ID, version, build
 GUID, and GameAssembly arm64 UUID. An unknown build remains detectable and can

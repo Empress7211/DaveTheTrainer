@@ -39,8 +39,58 @@ def require_stopped(source, executable):
             raise ValueError("Save and quit the Steam game first; refusing to alter a running target")
 
 
+def sync_directory(directory):
+    descriptor = os.open(directory, os.O_RDONLY)
+    try:
+        os.fsync(descriptor)
+    finally:
+        os.close(descriptor)
+
+
+def write_json(path, value):
+    """Keep the previous JSON intact until the replacement is fully written."""
+    descriptor, temporary = tempfile.mkstemp(prefix="." + path.name + "-", dir=path.parent)
+    temporary = Path(temporary)
+    try:
+        with os.fdopen(descriptor, "w", encoding="utf-8") as file:
+            json.dump(value, file, indent=2)
+            file.write("\n")
+            file.flush()
+            os.fsync(file.fileno())
+        os.replace(temporary, path)
+        sync_directory(path.parent)
+    finally:
+        temporary.unlink(missing_ok=True)
+
+
+def journal_path(path):
+    return path.with_name(path.name + ".recovery.json")
+
+
+def write_journal(path, receipt, operation):
+    write_json(journal_path(path), {
+        "schema": 1, "receipt_path": str(path.resolve()),
+        "operation": operation, "receipt": receipt,
+    })
+
+
+def finish_receipt(path, receipt):
+    write_json(path, receipt)
+    journal_path(path).unlink(missing_ok=True)
+    sync_directory(path.parent)
+
+
 def read_receipt(path):
-    receipt = json.loads(path.read_text())
+    recovery = journal_path(path)
+    if recovery.exists():
+        # A durable journal also recovers a missing/truncated legacy receipt.
+        journal = json.loads(recovery.read_text())
+        if (journal.get("schema") != 1 or journal.get("receipt_path") != str(path.resolve())
+                or journal.get("operation") not in ("apply", "restore")):
+            raise ValueError("Invalid recovery journal; preserve the full backup")
+        receipt = journal["receipt"]
+    else:
+        receipt = json.loads(path.read_text())
     if receipt.get("schema") != 1:
         raise ValueError("Unsupported receipt")
     source = Path(receipt["source"]).resolve(strict=True)
@@ -55,6 +105,15 @@ def read_receipt(path):
         raise ValueError("Invalid executable in receipt")
     if receipt["allowed_changes"] != allowed:
         raise ValueError("Receipt must restrict changes to launcher and resource signature")
+    for manifest in [receipt["prepared"], receipt.get("applied", receipt["prepared"])]:
+        changed = {key for key in receipt["baseline"].keys() | manifest.keys()
+                   if receipt["baseline"].get(key) != manifest.get(key)}
+        if receipt["executable"] not in changed or not changed.issubset(set(allowed)):
+            raise ValueError("Receipt changes exceed the authorized signing files")
+        for relative in allowed:
+            for state in [receipt["baseline"], manifest]:
+                if set(state.get(relative, {})) != {"sha256"}:
+                    raise ValueError("Signing files must be regular files in every recorded state")
     return receipt, source, backup, staged
 
 
@@ -103,7 +162,7 @@ def prepare(source, workspace, backup_root):
         "baseline": baseline, "prepared": prepared, "state": "prepared"
     }
     receipt_path = workspace / "receipt.json"
-    receipt_path.write_text(json.dumps(receipt, indent=2) + "\n")
+    write_json(receipt_path, receipt)
     print("PREPARED ONLY: Steam game has not been changed.")
     print("Original signature and every game file backed up:", backup)
     print("Reviewed changes: launcher code signature and bundle resource signature only.")
@@ -111,24 +170,24 @@ def prepare(source, workspace, backup_root):
 
 
 def replace_files(source, replacement, allowed):
-    # Use the system copy tool for signed app files. A failed apply restores
-    # both files from the verified backup; no nested game binaries are signed.
+    # Install exact, already-signed bytes on fresh inodes. Staging beside the
+    # bundle keeps interrupted temporary copies out of its signed manifest.
+    for relative in allowed:
+        if source.parent.stat().st_dev != (source / relative).parent.stat().st_dev:
+            raise ValueError("Atomic signing-file replacement requires a single filesystem")
     for relative in allowed:
         target = source / relative
-        subprocess.run(["/bin/cp", "-p", str(replacement / relative), str(target)], check=True)
-
-
-def resign_original(source, staged, workspace):
-    entitlements = subprocess.check_output([
-        "/usr/bin/codesign", "-d", "--entitlements", "-", "--xml", str(staged)
-    ])
-    with tempfile.NamedTemporaryFile(suffix=".entitlements", dir=workspace) as file:
-        file.write(entitlements)
-        file.flush()
-        subprocess.run([
-            "/usr/bin/codesign", "--force", "--sign", "-", "--options", "runtime",
-            "--entitlements", file.name, str(source)
-        ], check=True)
+        descriptor, temporary = tempfile.mkstemp(prefix=".davetrainer-signature-", dir=source.parent)
+        os.close(descriptor)
+        temporary = Path(temporary)
+        try:
+            subprocess.run(["/bin/cp", "-p", str(replacement / relative), str(temporary)], check=True)
+            with temporary.open("rb") as file:
+                os.fsync(file.fileno())
+            os.replace(temporary, target)
+            sync_directory(target.parent)
+        finally:
+            temporary.unlink(missing_ok=True)
 
 
 def entitlements(bundle):
@@ -140,31 +199,46 @@ def entitlements(bundle):
 def apply(receipt_path):
     receipt, source, backup, staged = read_receipt(receipt_path)
     require_stopped(source, receipt["executable"])
+    if journal_path(receipt_path).exists():
+        raise ValueError("An interrupted operation needs recovery; run restore with this receipt before retrying apply")
     if snapshot(backup) != receipt["baseline"] or snapshot(staged) != receipt["prepared"]:
         raise ValueError("Backup or prepared bundle changed; no original files replaced")
     if snapshot(source) != receipt["baseline"]:
         raise ValueError("Steam game changed since preparation; prepare again for the current installation")
     subprocess.run(["/usr/bin/codesign", "--verify", "--strict", str(staged)], check=True)
+    expected_entitlements = entitlements(staged)
+    if expected_entitlements.get("com.apple.security.get-task-allow") is not True:
+        raise ValueError("Prepared bundle does not allow debugging")
+    # All possible installed file hashes are durable before the first mutation.
+    # Do not independently re-sign the original: that could produce unrecorded
+    # hashes if signing or receipt persistence is interrupted.
+    receipt["applied"] = receipt["prepared"]
+    receipt["state"] = "applying"
+    write_journal(receipt_path, receipt, "apply")
     require_stopped(source, receipt["executable"])
     try:
-        resign_original(source, staged, receipt_path.parent)
+        replace_files(source, staged, receipt["allowed_changes"])
         subprocess.run(["/usr/bin/codesign", "--verify", "--strict", str(source)], check=True)
         applied = snapshot(source)
-        changed = {key for key in receipt["baseline"].keys() | applied.keys() if receipt["baseline"].get(key) != applied.get(key)}
-        if receipt["executable"] not in changed or not changed.issubset(set(receipt["allowed_changes"])):
-            raise ValueError("Original changed outside the two authorized signing files")
-        expected_entitlements = entitlements(staged)
-        if expected_entitlements.get("com.apple.security.get-task-allow") is not True or entitlements(source) != expected_entitlements:
+        if applied != receipt["applied"]:
+            raise ValueError("Original does not match the exact journaled signing files")
+        if entitlements(source) != expected_entitlements:
             raise ValueError("Original did not receive exactly the reviewed entitlements")
+        receipt["state"] = "applied"
+        finish_receipt(receipt_path, receipt)
     except BaseException:
         if snapshot(source) != receipt["baseline"]:
             replace_files(source, backup, receipt["allowed_changes"])
         if snapshot(source) != receipt["baseline"]:
             raise RuntimeError("Apply failed and rollback could not be verified; preserve the full backup")
+        receipt["state"] = "prepared"
+        # On persistent storage failure, retain the journal so restore can
+        # finalize recovery even if the main receipt is unreadable.
+        try:
+            finish_receipt(receipt_path, receipt)
+        except OSError:
+            pass
         raise
-    receipt["state"] = "applied"
-    receipt["applied"] = applied
-    receipt_path.write_text(json.dumps(receipt, indent=2) + "\n")
     print("Applied debug permission at the original Steam path:", source)
     print("GameAssembly, metadata, game resources and saves were not changed.")
     print("Launch normally through Steam, then attach the trainer.")
@@ -177,15 +251,26 @@ def restore(receipt_path):
         raise ValueError("Backup changed; refusing restore")
     current = snapshot(source)
     if current == receipt["baseline"]:
+        receipt["state"] = "restored"
+        finish_receipt(receipt_path, receipt)
         print("Original signature already restored; no files changed.")
         return
-    if current != receipt.get("applied", receipt["prepared"]):
+    applied = receipt.get("applied", receipt["prepared"])
+    recoverable = journal_path(receipt_path).exists() and all(
+        current.get(key) in (receipt["baseline"].get(key), applied.get(key))
+        if key in receipt["allowed_changes"] else current.get(key) == receipt["baseline"].get(key)
+        for key in current.keys() | receipt["baseline"].keys() | applied.keys()
+    )
+    if current != applied and not recoverable:
         raise ValueError("Steam game changed after apply; refusing to restore an old signature onto new assets")
+    receipt["applied"] = applied
+    receipt["state"] = "restoring"
+    write_journal(receipt_path, receipt, "restore")
     replace_files(source, backup, receipt["allowed_changes"])
     if snapshot(source) != receipt["baseline"]:
         raise ValueError("Restored files differ from the original backup")
     receipt["state"] = "restored"
-    receipt_path.write_text(json.dumps(receipt, indent=2) + "\n")
+    finish_receipt(receipt_path, receipt)
     print("Restored exact original launcher, official signature and all original file hashes.")
 
 

@@ -18,7 +18,7 @@ Cheat Engine 风格工具。玩家按钮都绑定到已审查的 manifest featur
 Mach-O 模块形态、确定的补丁点或运行时对象路径。安装路径可以变化，但玩家内存写入
 必须匹配经过审核的精确构建 profile。`v1.0.6.675.mac` 是完整验证的 profile，
 `v1.0.6.710.mac` 是根据 issue #2 报告建立的部分兼容 profile，
-`v1.0.6.756.mac` 已补齐全部 22 个控件的精确 profile，游戏内效果仍待实测。
+`v1.0.6.756.mac` 已补齐全部 22 个控件的精确 profile；完整游戏效果仍待实测，写入默认关闭，需明确开启实验功能。
 
 > 本项目与 MINTROCKET、Nexon 或 `DAVE THE DIVER` 创作者没有隶属、赞助、
 > 背书或官方合作关系。
@@ -32,7 +32,7 @@ Mach-O 模块形态、确定的补丁点或运行时对象路径。安装路径�
 | 包管理 | Swift Package Manager |
 | 已验证基线版本 | `v1.0.6.675.mac` |
 | 证据支持的部分版本 | `v1.0.6.710.mac` |
-| 全部控件已适配，游戏实测待完成 | `v1.0.6.756.mac` |
+| 实验 profile，默认禁止写入 | `v1.0.6.756.mac`；全部控件已适配，游戏实测待完成 |
 | 目标模块 | `GameAssembly.dylib` |
 | Manifest schema | `1.0` |
 | 测试 | 覆盖 manifest 策略、事务补丁、运行时增量、发布脚本和玩家路径契约 |
@@ -70,14 +70,16 @@ xattr -dr com.apple.quarantine /Applications/DaveTheTrainer.app
 | --- | --- |
 | `v1.0.6.675.mac` | 完整基线 profile |
 | `v1.0.6.710.mac` | 72 个精确目标，覆盖无敌、氧气、弹药、鱼笼、负重、部分移动速度、无人机、体力和芥末；其他控件禁用 |
-| `v1.0.6.756.mac` | 全部 22 个控件；101 个代码目标及新版货币、库存字段路径；游戏内效果待实测 |
+| `v1.0.6.756.mac` | 22 个控件的实验 profile；101 个代码目标及新版货币、库存字段路径；默认禁止写入 |
 
 `.710` 目标已与用户报告中的 GameAssembly 字节证据逐点核对，并绑定其精确 UUID。
 由于维护者本机没有该版本，尚未完成实际游戏行为验证。请逐项测试已启用功能，不要把
 `bytesApplied` 等同于游戏内效果已确认。详见 [兼容证据说明](docs/compatibility-v1.0.6.710.mac.md)。
 
 `.756` 已在本地 arm64 二进制上核对全部 101 个代码目标窗口和 RPG 跳板空间，
-资源功能采用新版 metadata 字段布局；全部 22 个控件已开放，游戏内实际效果仍待确认。
+资源功能采用新版 metadata 字段布局。备份存档后，在页面明确开启“启用 .756 实验功能”
+才允许写入；该开关每次启动默认关闭，且不能绕过精确版本或模块校验。恢复代码补丁不受该开关阻止。
+完整潜水、战斗、寿司店效果及有库存时的素材修改仍待实测。
 详见 [v1.0.6.756.mac 兼容证据](docs/compatibility-v1.0.6.756.mac.md)。
 
 玩家内存写入必须精确匹配 manifest 中的 bundle ID、版本、build GUID 和 GameAssembly
@@ -153,6 +155,7 @@ swift test
 GitHub Actions 运行公开测试套件，并跳过需要本机游戏安装或专有游戏文件的测试：
 
 ```bash
+python3 -m unittest discover -s script/tests -v
 swift test \
   --skip InstalledGameIntegrationTests \
   --skip Il2CppFeatureLocatorTests \

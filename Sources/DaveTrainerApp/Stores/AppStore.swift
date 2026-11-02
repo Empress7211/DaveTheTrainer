@@ -97,6 +97,12 @@ final class AppStore: ObservableObject {
     @Published private(set) var isBusy = false
     @Published private(set) var logs: [String] = []
     @Published var calibrationFeatureID = "gold"
+    // Session-only consent; every launch starts with experimental writes gated.
+    @Published var allowExperimentalFeatures = false
+
+    var showsExperimentalControls: Bool {
+        install?.signature.matchesIdentity(of: KnownGameBuild.v106756) == true
+    }
 
     var isRunningAsAdministrator: Bool {
         geteuid() == 0
@@ -237,7 +243,9 @@ final class AppStore: ObservableObject {
         guard let featureID = DaveTrainerFeatureID(rawValue: option.manifestFeatureID) else {
             return "功能没有有效的 manifest ID。"
         }
-        return trainerOperationService.unsupportedReason(featureID: featureID, gameBuild: build)
+        return trainerOperationService.unsupportedReason(
+            featureID: featureID, gameBuild: build, allowExperimentalFeatures: allowExperimentalFeatures
+        )
     }
 
     func refreshStaticFeatures() {
@@ -574,12 +582,15 @@ final class AppStore: ObservableObject {
         let gameBuild = try currentOperationBuild()
         if let failure = trainerOperationService.buildCompatibilityFailure(
             featureID: featureID,
-            gameBuild: gameBuild
+            gameBuild: gameBuild,
+            allowExperimentalFeatures: allowExperimentalFeatures || !config.request.isEnabled
         ) {
             publishOperationResult(failure)
             return false
         }
-        let context = TrainerOperationContext(session: try requireSession(), gameBuild: gameBuild)
+        let context = TrainerOperationContext(
+            session: try requireSession(), gameBuild: gameBuild, allowExperimentalFeatures: allowExperimentalFeatures
+        )
         let result = try trainerOperationService.apply(TrainerOperationRequest(
             featureID: featureID,
             isEnabled: config.request.isEnabled,
@@ -690,7 +701,8 @@ final class AppStore: ObservableObject {
             let gameBuild = try currentOperationBuild()
             if let failure = trainerOperationService.buildCompatibilityFailure(
                 featureID: featureID,
-                gameBuild: gameBuild
+                gameBuild: gameBuild,
+                allowExperimentalFeatures: allowExperimentalFeatures
             ) {
                 publishOperationResult(failure)
                 completion(false)
@@ -707,7 +719,9 @@ final class AppStore: ObservableObject {
                             isEnabled: request.isEnabled,
                             payload: payload
                         ),
-                        context: TrainerOperationContext(session: activeSession, gameBuild: gameBuild)
+                        context: TrainerOperationContext(
+                            session: activeSession, gameBuild: gameBuild, allowExperimentalFeatures: allowExperimentalFeatures
+                        )
                     )
                     isBusy = false
                     publishOperationResult(result)

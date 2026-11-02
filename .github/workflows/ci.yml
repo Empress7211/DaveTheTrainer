@@ -2,7 +2,6 @@ name: CI
 
 on:
   push:
-    branches: ["main"]
   pull_request:
 
 jobs:
@@ -16,6 +15,9 @@ jobs:
 
       - name: Show Swift version
         run: swift --version
+
+      - name: Test native Steam signing and recovery
+        run: python3 -m unittest discover -s script/tests -v
 
       - name: Run tests
         run: >

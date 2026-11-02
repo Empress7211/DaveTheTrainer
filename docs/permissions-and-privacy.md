@@ -78,6 +78,15 @@ manifest, and records the applied hashes. A failed application restores the
 original signing files. Restore refuses to put an old signature over a changed
 Steam installation and works without the staged payload.
 
+Signing files are atomically replaced with the verified payload, after a durable
+`receipt.json.recovery.json` journal records both permitted file states. Keep
+this journal beside the receipt after any interrupted operation. Run the same
+`restore` command to recover, even if the main receipt is missing or truncated.
+Only journaled baseline/applied combinations are accepted; unrelated asset
+changes and unrecognized signing bytes are still refused. Receipt write failure
+rolls back application, and partial restoration can be retried. Original
+schema-1 receipts from earlier versions remain supported.
+
 The official local launcher signature is replaced with an ad-hoc debug signature.
 Local debugging tools can then access the game process. GameAssembly, metadata,
 resources, bundle identity and the Steam launch path are retained; saves are not

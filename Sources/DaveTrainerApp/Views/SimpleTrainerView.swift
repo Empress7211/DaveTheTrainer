@@ -131,6 +131,17 @@ private struct SimpleOptionsPanel: View {
             VStack(alignment: .leading, spacing: 18) {
                 header
                 SimpleMessageBanner()
+                if store.showsExperimentalControls {
+                    VStack(alignment: .leading, spacing: 6) {
+                        Toggle("启用 .756 实验功能", isOn: $store.allowExperimentalFeatures)
+                            .disabled(store.isBusy || !store.enabledPatchIDs.isEmpty || !store.frozenFeatureIDs.isEmpty)
+                        Text("完整游戏效果尚待验证。请先备份存档，逐项测试；关闭功能并恢复补丁后才能关闭实验模式。")
+                            .font(.callout)
+                            .foregroundStyle(.orange)
+                    }
+                    .padding(12)
+                    .background(Color.orange.opacity(0.12), in: RoundedRectangle(cornerRadius: 12))
+                }
                 SimpleOptionSection(title: "Diving Options", options: SimpleTrainerOptions.diving)
                 SimpleOptionSection(title: "Currency Options", options: SimpleTrainerOptions.currencies)
                 SimpleOptionSection(title: "Inventory Options", options: SimpleTrainerOptions.inventory)

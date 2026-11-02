@@ -3,6 +3,53 @@ import TrainerCore
 @testable import DaveTheTrainer
 
 final class TrainerOperationServiceTests: XCTestCase {
+    func testV106756WritesAreGatedBeforePreflightUntilExplicitOptIn() throws {
+        let applier = RecordingTrainerOperationApplier()
+        let service = TrainerOperationService(configuration: .v106756(applier: applier))
+        let context = TrainerOperationContext(session: Self.session(), gameBuild: KnownGameBuild.v106756)
+        for featureID in DaveTrainerFeatureID.allCases {
+            XCTAssertNotNil(service.buildCompatibilityFailure(featureID: featureID, gameBuild: context.gameBuild))
+            XCTAssertTrue(service.unsupportedReason(featureID: featureID, gameBuild: context.gameBuild)?.contains("实验功能") == true)
+            let result = try service.apply(
+                TrainerOperationRequest(featureID: featureID, isEnabled: true, payload: .staticPatch(patchID: "god")),
+                context: context
+            )
+            XCTAssertEqual(result.state, .unsupportedBuild)
+            XCTAssertTrue(result.message.contains("实验功能"))
+        }
+        XCTAssertTrue(applier.preflightRequests.isEmpty)
+        XCTAssertTrue(applier.requests.isEmpty)
+    }
+
+    func testV106756CodeRestorationDoesNotRequireOptIn() throws {
+        let applier = RecordingTrainerOperationApplier()
+        let service = TrainerOperationService(configuration: .v106756(applier: applier))
+        let patch = TrainerOperationPayload.staticPatch(patchID: "oxygen")
+        _ = try service.apply(
+            TrainerOperationRequest(featureID: .oxygen, isEnabled: true, payload: patch),
+            context: TrainerOperationContext(session: Self.session(), gameBuild: KnownGameBuild.v106756, allowExperimentalFeatures: true)
+        )
+        let restored = try service.apply(
+            TrainerOperationRequest(featureID: .oxygen, isEnabled: false, payload: patch),
+            context: TrainerOperationContext(session: Self.session(), gameBuild: KnownGameBuild.v106756)
+        )
+        XCTAssertEqual(restored.state, .bytesApplied)
+        XCTAssertEqual(Array(applier.requests.suffix(4)).map(\.isEnabled), [false, false, false, false])
+    }
+
+    func testV106756ResourceWritesCannotBypassGateUsingDisabledRequest() throws {
+        let quantity = RecordingRuntimeQuantityIncrementer(result: RuntimeQuantityIncrementResult(updatedAddressCount: 1))
+        let service = TrainerOperationService(configuration: .v106756(
+            applier: RecordingTrainerOperationApplier(), runtimeQuantityIncrementer: quantity
+        ))
+        let result = try service.apply(
+            TrainerOperationRequest(featureID: .gold, isEnabled: false, payload: .runtimeQuantity(resourceID: .gold, valueText: "1")),
+            context: TrainerOperationContext(session: Self.session(), gameBuild: KnownGameBuild.v106756)
+        )
+        XCTAssertEqual(result.state, .unsupportedBuild)
+        XCTAssertTrue(quantity.requests.isEmpty)
+    }
+
     func testUnknownBuildStaticPatchReturnsUnsupportedWithoutWritingMemory() throws {
         let applier = RecordingTrainerOperationApplier()
         let service = TrainerOperationService(configuration: .test(applier: applier))
@@ -107,7 +154,7 @@ final class TrainerOperationServiceTests: XCTestCase {
                 isEnabled: true,
                 payload: .staticPatch(patchID: "oxygen")
             ),
-            context: TrainerOperationContext(session: Self.session(), gameBuild: KnownGameBuild.v106756)
+            context: TrainerOperationContext(session: Self.session(), gameBuild: KnownGameBuild.v106756, allowExperimentalFeatures: true)
         )
 
         XCTAssertEqual(result.state, .bytesApplied)
@@ -123,15 +170,15 @@ final class TrainerOperationServiceTests: XCTestCase {
         XCTAssertTrue(baselineApplier.requests.isEmpty)
     }
 
-    func testV106756AllPlayerFeaturesAreSupportedAndDamageUsesNewTargets() throws {
+    func testV106756OptedInFeaturesAreSupportedAndDamageUsesNewTargets() throws {
         let applier = RecordingTrainerOperationApplier()
         let service = TrainerOperationService(configuration: .v106756(applier: applier))
         for featureID in DaveTrainerFeatureID.allCases {
-            XCTAssertNil(service.buildCompatibilityFailure(featureID: featureID, gameBuild: KnownGameBuild.v106756))
+            XCTAssertNil(service.buildCompatibilityFailure(featureID: featureID, gameBuild: KnownGameBuild.v106756, allowExperimentalFeatures: true))
         }
         let result = try service.apply(
             TrainerOperationRequest(featureID: .damage, isEnabled: true, payload: .staticPatch(patchID: "damage")),
-            context: TrainerOperationContext(session: Self.session(), gameBuild: KnownGameBuild.v106756)
+            context: TrainerOperationContext(session: Self.session(), gameBuild: KnownGameBuild.v106756, allowExperimentalFeatures: true)
         )
         XCTAssertEqual(result.state, .bytesApplied)
         XCTAssertEqual(result.targetIDs, (3...23).map { "damage.\($0)" })
@@ -148,7 +195,7 @@ final class TrainerOperationServiceTests: XCTestCase {
             ingredientsIncrementer: ingredients,
             jungleIngredientsIncrementer: jungle
         ))
-        let context = TrainerOperationContext(session: Self.session(), gameBuild: KnownGameBuild.v106756)
+        let context = TrainerOperationContext(session: Self.session(), gameBuild: KnownGameBuild.v106756, allowExperimentalFeatures: true)
         var operations: [(DaveTrainerFeatureID, TrainerOperationPayload)] = [.gold, .bei, .jungleGold, .artisan].map {
             ($0, .runtimeQuantity(resourceID: $0, valueText: "99"))
         }
@@ -175,7 +222,7 @@ final class TrainerOperationServiceTests: XCTestCase {
         let service = TrainerOperationService(configuration: .v106756(applier: applier))
         let result = try service.apply(
             TrainerOperationRequest(featureID: .gold, isEnabled: true, payload: .valuePatch(patchID: "gold", valueText: "999")),
-            context: TrainerOperationContext(session: Self.session(), gameBuild: KnownGameBuild.v106756)
+            context: TrainerOperationContext(session: Self.session(), gameBuild: KnownGameBuild.v106756, allowExperimentalFeatures: true)
         )
         XCTAssertEqual(result.state, .targetMismatch)
         XCTAssertTrue(applier.preflightRequests.isEmpty)
@@ -192,7 +239,7 @@ final class TrainerOperationServiceTests: XCTestCase {
                 isEnabled: true,
                 payload: .valuePatch(patchID: "swimSpeed", valueText: "7")
             ),
-            context: TrainerOperationContext(session: Self.session(), gameBuild: KnownGameBuild.v106756)
+            context: TrainerOperationContext(session: Self.session(), gameBuild: KnownGameBuild.v106756, allowExperimentalFeatures: true)
         )
 
         XCTAssertEqual(result.state, .bytesApplied)

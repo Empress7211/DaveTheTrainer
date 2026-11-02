@@ -2,13 +2,16 @@
 
 ## Unreleased
 
+- Journal signing recovery before mutation, atomically persist receipts and replace reviewed signing files; recover interrupted apply/restore while rejecting unrelated asset changes. Retain legacy receipt restoration.
+- Run native Python signing/recovery tests in macOS CI on pushes and pull requests; cover receipt failures, partial restore and abrupt process exit.
+- Gate all `.756` writes behind explicit, session-only experimental consent pending complete gameplay/resource validation; preserve code restoration and older profile behavior.
 - Handle empty jungle/village managed dictionaries without dereferencing a null entries array, while rejecting null arrays for nonempty dictionaries.
 - Record normal-user Steam-original attach, live apply/readback/restore for all 11 code controls, UI oxygen/gold verification and live resource-planning limits.
 - Add an explicit Steam-installation debug-permission workflow with a complete original backup, constrained signing changes, failure rollback and exact signature restoration, preserving normal Steam launching.
 - Distinguish hardened-target signing denial from missing administrator elevation, sign trainer bundles with the debugging-tool entitlement, and provide an explicit opt-in script for an independent debug game copy.
 
 - Add an exact all-control profile for `v1.0.6.756.mac`, bound to its build GUID and arm64 GameAssembly UUID.
-- Enable all 22 controls with 101 byte-verified code targets, enemy-specific damage policies, complete active speed targets, and a reviewed version-specific runtime resource layout.
+- Expose all 22 controls behind the experimental gate, with 101 byte-verified code targets, enemy-specific damage policies, complete active speed targets, and a reviewed version-specific runtime resource layout.
 - Add build-routing, resource-layout, damage-policy and rejection tests plus an optional read-only local binary check. Gameplay effects remain unverified.
 
 ## v0.1.5 - 2026-08-02
