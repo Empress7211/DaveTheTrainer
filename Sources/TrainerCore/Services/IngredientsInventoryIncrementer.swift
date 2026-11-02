@@ -15,20 +15,14 @@ private let ingredientsSaveIDOffset = 0x10
 private let ingredientsSaveCountOffset = 0x4C
 private let pointerAlignment = UInt64(8)
 private let pointerByteCount = 8
-private let saveSystemSingletonInstanceMethodRVA = UInt64(0x98D7948)
-private let saveSystemSingletonHasInstanceMethodRVA = UInt64(0x98D7950)
 private let saveSystemGameDataManagerOffset = UInt64(0x50)
 private let saveSystemGameDataManagerDataOffset = UInt64(0x50)
 private let saveDataDirtyFlagOffset = UInt64(0x29)
-private let saveDataIngredientsDictionaryOffset = UInt64(0x100)
-private let saveDataPlayerInfoOffset = UInt64(0x220)
 private let firstFishIngredientsType = Int32(0)
 private let lastFishIngredientsType = Int32(1)
 private let vegetableIngredientsType = Int32(2)
 private let seasoningIngredientsType = Int32(3)
 private let upgradeMaterialsType = Int32(4)
-private let ingredientsStorageSingletonInstanceMethodRVA = UInt64(0x98D6E88)
-private let ingredientsStorageSingletonConstructorMethodRVA = UInt64(0x98D6E80)
 private let runtimeMethodGenericContextOffset = UInt64(0x20)
 private let runtimeGenericClassContainerOffset = UInt64(0xC0)
 private let runtimeGenericClassTypeOffset = UInt64(0x10)
@@ -170,6 +164,7 @@ extension MemorySession: IngredientsInventoryMemorySession {}
 
 public final class IngredientsInventoryIncrementer {
     private let scanner: IngredientsInventoryObjectScanner
+    private let layout: DaveRuntimeLayout
     private let moduleResolver: GameAssemblyResolving
     private var cachedGameAssembly: CachedGameAssembly?
     private var cachedStorageAddresses: [RuntimeAddressCacheKey: UInt64] = [:]
@@ -178,10 +173,12 @@ public final class IngredientsInventoryIncrementer {
 
     public init(
         scanner: IngredientsInventoryObjectScanner = IngredientsInventoryObjectScanner(),
-        moduleResolver: GameAssemblyResolving = MachOModuleResolver()
+        moduleResolver: GameAssemblyResolving = MachOModuleResolver(),
+        layout: DaveRuntimeLayout = .v106675
     ) {
         self.scanner = scanner
         self.moduleResolver = moduleResolver
+        self.layout = layout
     }
 
     public func clearCachedAddresses() {
@@ -230,7 +227,7 @@ public final class IngredientsInventoryIncrementer {
         }
 
         var failures: [String] = []
-        for methodRVA in [ingredientsStorageSingletonInstanceMethodRVA, ingredientsStorageSingletonConstructorMethodRVA] {
+        for methodRVA in [layout.ingredientsInstanceMethodRVA, layout.ingredientsConstructorMethodRVA] {
             do {
                 let storage = try resolveSingletonInstance(
                     methodVariableAddress: module.baseAddress + methodRVA,
@@ -315,7 +312,7 @@ public final class IngredientsInventoryIncrementer {
 
         let saveData = try resolveSaveData(module: module, session: session)
         let dictionary = try readAlignedPointer(
-            address: saveData + saveDataIngredientsDictionaryOffset,
+            address: saveData + layout.saveDataIngredientsDictionaryOffset,
             context: "SaveData.IngredientsData",
             session: session
         )
@@ -345,7 +342,7 @@ public final class IngredientsInventoryIncrementer {
         session: IngredientsInventoryMemorySession
     ) throws -> UInt64 {
         var failures: [String] = []
-        for methodRVA in [saveSystemSingletonInstanceMethodRVA, saveSystemSingletonHasInstanceMethodRVA] {
+        for methodRVA in [layout.saveSystemInstanceMethodRVA, layout.saveSystemHasInstanceMethodRVA] {
             do {
                 let saveSystem = try resolveSaveSystemInstance(
                     methodVariableAddress: module.baseAddress + methodRVA,
@@ -440,9 +437,9 @@ public final class IngredientsInventoryIncrementer {
 
     private func validateSaveData(address: UInt64, session: IngredientsInventoryMemorySession) throws {
         try validateRuntimeObjectHeader(address: address, session: session)
-        _ = try readAlignedPointer(address: address + saveDataPlayerInfoOffset, context: "SaveData.playerInfo", session: session)
+        _ = try readAlignedPointer(address: address + layout.saveDataPlayerInfoOffset, context: "SaveData.playerInfo", session: session)
         _ = try readAlignedPointer(
-            address: address + saveDataIngredientsDictionaryOffset,
+            address: address + layout.saveDataIngredientsDictionaryOffset,
             context: "SaveData.IngredientsData",
             session: session
         )

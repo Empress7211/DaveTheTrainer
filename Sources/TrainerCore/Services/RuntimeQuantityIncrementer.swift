@@ -15,8 +15,6 @@ private let saveDataJungleCurrencyHolderPointerOffset = 0xD0
 private let saveDataJungleCurrencyHolderByteCount = 0x18
 private let saveDataJungleGoldOffset = 0x10
 private let saveDataJungleChefFlameOffset = 0x14
-private let saveSystemSingletonInstanceMethodRVA = UInt64(0x98D7948)
-private let saveSystemSingletonHasInstanceMethodRVA = UInt64(0x98D7950)
 private let runtimeMethodGenericContextOffset = UInt64(0x20)
 private let runtimeGenericClassContainerOffset = UInt64(0xC0)
 private let runtimeGenericClassTypeOffset = UInt64(0x10)
@@ -24,8 +22,6 @@ private let il2CppClassStaticFieldsOffset = UInt64(0xB8)
 private let singletonInstanceStaticFieldOffset = UInt64(0x0)
 private let saveSystemGameDataManagerOffset = UInt64(0x50)
 private let saveSystemGameDataManagerDataOffset = UInt64(0x50)
-private let saveDataPlayerInfoOffset = UInt64(0x220)
-private let gameSaveJungleSaveDataOffset = UInt64(0x2A8)
 private let runtimeObjectScanStride = 8
 private let pointerByteCount = 8
 private let pointerAlignment = UInt64(8)
@@ -316,14 +312,17 @@ public extension MemorySession {
 }
 
 public final class RuntimeQuantityIncrementer {
+    private let layout: DaveRuntimeLayout
     private let moduleResolver: GameAssemblyResolving
     private var cachedFeatureAddresses: [RuntimeAddressCacheKey: Set<UInt64>] = [:]
     private var cachedGameAssembly: CachedGameAssembly?
 
     public init(
-        moduleResolver: GameAssemblyResolving = MachOModuleResolver()
+        moduleResolver: GameAssemblyResolving = MachOModuleResolver(),
+        layout: DaveRuntimeLayout = .v106675
     ) {
         self.moduleResolver = moduleResolver
+        self.layout = layout
     }
 
     public func clearCachedAddresses() {
@@ -431,7 +430,7 @@ public final class RuntimeQuantityIncrementer {
     ) throws -> UInt64 {
         let saveData = try resolveSaveData(module: module, session: session)
         let playerInfoSave = try readAlignedPointer(
-            address: saveData + saveDataPlayerInfoOffset,
+            address: saveData + layout.saveDataPlayerInfoOffset,
             context: "SaveData.playerInfo"
         ) { request in
             try session.read(request)
@@ -448,7 +447,7 @@ public final class RuntimeQuantityIncrementer {
     ) throws -> UInt64 {
         let gameSave = try resolveSaveData(module: module, session: session)
         let jungleSaveData = try readAlignedPointer(
-            address: gameSave + gameSaveJungleSaveDataOffset,
+            address: gameSave + layout.saveDataJungleOffset,
             context: "GameSave.SaveDataJungle"
         ) { request in
             try session.read(request)
@@ -544,7 +543,7 @@ public final class RuntimeQuantityIncrementer {
         session: RuntimeQuantityMemorySession
     ) throws -> UInt64 {
         var failures: [String] = []
-        for methodRVA in [saveSystemSingletonInstanceMethodRVA, saveSystemSingletonHasInstanceMethodRVA] {
+        for methodRVA in [layout.saveSystemInstanceMethodRVA, layout.saveSystemHasInstanceMethodRVA] {
             do {
                 let saveSystem = try resolveSingletonInstance(
                     methodVariableAddress: module.baseAddress + methodRVA,
@@ -644,7 +643,7 @@ public final class RuntimeQuantityIncrementer {
     private func validateSaveData(address: UInt64, session: RuntimeQuantityMemorySession) throws {
         try validateRuntimeObjectHeader(address: address, session: session)
         _ = try readAlignedPointer(
-            address: address + saveDataPlayerInfoOffset,
+            address: address + layout.saveDataPlayerInfoOffset,
             context: "SaveData.playerInfo"
         ) { request in
             try session.read(request)

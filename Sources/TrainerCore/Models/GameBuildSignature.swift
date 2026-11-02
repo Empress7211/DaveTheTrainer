@@ -77,5 +77,17 @@ public enum KnownGameBuild {
         )
     )
 
+    public static let v106756 = GameBuildSignature(
+        identity: GameBuildIdentity(
+            bundleID: "com.nexon.dave",
+            version: "v1.0.6.756.mac",
+            buildGUID: "1958d94b767741a5a13a2ae0032db743"
+        ),
+        paths: GameBuildPaths(
+            executablePath: "/Applications/DaveTheDiver.app/Contents/Game/DaveTheDiver.app/Contents/MacOS/DAVE THE DIVER",
+            metadataPath: "/Applications/DaveTheDiver.app/Contents/Game/DaveTheDiver.app/Contents/Resources/Data/il2cpp_data/Metadata/global-metadata.dat"
+        )
+    )
+
     public static let current = v106675
 }
