@@ -4,6 +4,13 @@ import TrainerCore
 struct TrainerOperationContext {
     let session: MemorySession
     let gameBuild: GameBuildSignature
+    let allowExperimentalFeatures: Bool
+
+    init(session: MemorySession, gameBuild: GameBuildSignature, allowExperimentalFeatures: Bool = false) {
+        self.session = session
+        self.gameBuild = gameBuild
+        self.allowExperimentalFeatures = allowExperimentalFeatures
+    }
 }
 
 enum TrainerOperationPayload {
@@ -64,6 +71,7 @@ final class TrainerOperationService {
             let manifest: DaveTrainerManifest
             let patches: [StaticGamePatch]
             let valuePatchFactory: StaticValuePatchFactory
+            let runtimeLayout: DaveRuntimeLayout
             let unsupportedFeatureIDs: Set<DaveTrainerFeatureID>
         }
 
@@ -82,14 +90,25 @@ final class TrainerOperationService {
                     manifest: .current,
                     patches: DefaultStaticGamePatches.make(),
                     valuePatchFactory: DefaultStaticGamePatches.makeValuePatch(id:valueText:),
+                    runtimeLayout: .v106675,
                     unsupportedFeatureIDs: []
                 )),
                 live(LiveProfile(
                     manifest: .v106710,
                     patches: DaveV106710StaticGamePatches.make(),
                     valuePatchFactory: DaveV106710StaticGamePatches.makeValuePatch(id:valueText:),
+                    runtimeLayout: .v106675,
                     unsupportedFeatureIDs: Set(DaveTrainerFeatureID.allCases).subtracting(
                         DaveTrainerManifest.v106710.features.map(\.id)
+                    )
+                )),
+                live(LiveProfile(
+                    manifest: .v106756,
+                    patches: DaveV106756StaticGamePatches.make(),
+                    valuePatchFactory: DaveV106756StaticGamePatches.makeValuePatch(id:valueText:),
+                    runtimeLayout: .v106756,
+                    unsupportedFeatureIDs: Set(DaveTrainerFeatureID.allCases).subtracting(
+                        DaveTrainerManifest.v106756.features.map(\.id)
                     )
                 ))
             ]
@@ -104,9 +123,9 @@ final class TrainerOperationService {
                 staticPatches: Dictionary(uniqueKeysWithValues: profile.patches.map { ($0.id, $0) }),
                 valuePatchFactory: profile.valuePatchFactory,
                 applier: StaticPatchEngine(moduleResolver: moduleResolver),
-                runtimeQuantityIncrementer: RuntimeQuantityIncrementer(moduleResolver: moduleResolver),
-                ingredientsIncrementer: IngredientsInventoryIncrementer(moduleResolver: moduleResolver),
-                jungleIngredientsIncrementer: JungleIngredientsInventoryIncrementer(moduleResolver: moduleResolver),
+                runtimeQuantityIncrementer: RuntimeQuantityIncrementer(moduleResolver: moduleResolver, layout: profile.runtimeLayout),
+                ingredientsIncrementer: IngredientsInventoryIncrementer(moduleResolver: moduleResolver, layout: profile.runtimeLayout),
+                jungleIngredientsIncrementer: JungleIngredientsInventoryIncrementer(moduleResolver: moduleResolver, layout: profile.runtimeLayout),
                 intentionallyUnsupportedFeatureIDs: profile.unsupportedFeatureIDs
             )
         }
@@ -142,17 +161,31 @@ final class TrainerOperationService {
         if service.intentionallyUnsupportedFeatureIDs.contains(request.featureID) {
             return unsupportedFeatureResult(featureID: request.featureID, service: service)
         }
+        let isCodeRestore: Bool
+        switch request.payload {
+        case .staticPatch, .staticPatchGroup, .valuePatch:
+            isCodeRestore = !request.isEnabled
+        default:
+            isCodeRestore = false
+        }
+        if !isCodeRestore, let reason = experimentalReason(service: service, allowed: context.allowExperimentalFeatures) {
+            return DaveTrainerOperationResult(featureID: request.featureID, state: .unsupportedBuild, targetIDs: [], message: reason)
+        }
         return try service.apply(request, context: context)
     }
 
     func buildCompatibilityFailure(
         featureID: DaveTrainerFeatureID,
-        gameBuild: GameBuildSignature
+        gameBuild: GameBuildSignature,
+        allowExperimentalFeatures: Bool = false
     ) -> DaveTrainerOperationResult? {
         guard let service = matchingService(for: gameBuild) else {
             return unsupportedBuildResult(featureID: featureID, actual: gameBuild)
         }
         guard service.intentionallyUnsupportedFeatureIDs.contains(featureID) else {
+            if let reason = experimentalReason(service: service, allowed: allowExperimentalFeatures) {
+                return DaveTrainerOperationResult(featureID: featureID, state: .unsupportedBuild, targetIDs: [], message: reason)
+            }
             return nil
         }
         return unsupportedFeatureResult(featureID: featureID, service: service)
@@ -170,13 +203,14 @@ final class TrainerOperationService {
 
     func unsupportedReason(
         featureID: DaveTrainerFeatureID,
-        gameBuild: GameBuildSignature
+        gameBuild: GameBuildSignature,
+        allowExperimentalFeatures: Bool = false
     ) -> String? {
         guard let service = matchingService(for: gameBuild) else {
             return "当前构建没有精确 profile；仅可导出兼容报告。"
         }
         guard service.intentionallyUnsupportedFeatureIDs.contains(featureID) else {
-            return nil
+            return experimentalReason(service: service, allowed: allowExperimentalFeatures)
         }
         return "此功能尚无 \(service.manifest.gameBuild.version) 的完整目标证据。"
     }
@@ -191,6 +225,13 @@ final class TrainerOperationService {
 
     private func matchingService(for build: GameBuildSignature) -> TrainerBuildOperationService? {
         profileServices.first { build.matchesIdentity(of: $0.manifest.gameBuild) }
+    }
+
+    private func experimentalReason(service: TrainerBuildOperationService, allowed: Bool) -> String? {
+        guard service.manifest.gameBuild.matchesIdentity(of: KnownGameBuild.v106756), !allowed else {
+            return nil
+        }
+        return "此版本功能尚待完整游戏实测。备份存档后，开启“启用 .756 实验功能”以继续。"
     }
 
     private func unsupportedBuildResult(

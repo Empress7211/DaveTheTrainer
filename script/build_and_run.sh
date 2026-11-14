@@ -30,6 +30,7 @@ APP_BINARY="$APP_MACOS/$APP_NAME"
 INFO_PLIST="$APP_CONTENTS/Info.plist"
 APP_ICON_SOURCE="$ROOT_DIR/Assets/AppIcon/DaveTheTrainer.icns"
 APP_ICON_NAME="DaveTheTrainer"
+APP_ENTITLEMENTS="$ROOT_DIR/Assets/Entitlements/DaveTheTrainer.entitlements"
 METADATA_SETTLE_SECONDS="1"
 IS_RELEASE_PACKAGE=0
 
@@ -89,7 +90,7 @@ resolve_sign_identity() {
 sign_and_verify_bundle() {
   local bundle_path="$1"
   clean_bundle_metadata "$bundle_path"
-  /usr/bin/codesign --force --deep --sign "$SIGN_IDENTITY" "$bundle_path"
+  /usr/bin/codesign --force --deep --options runtime --entitlements "$APP_ENTITLEMENTS" --sign "$SIGN_IDENTITY" "$bundle_path"
   sleep "$METADATA_SETTLE_SECONDS"
   clean_bundle_metadata "$bundle_path"
   /usr/bin/codesign --verify --deep --strict "$bundle_path"

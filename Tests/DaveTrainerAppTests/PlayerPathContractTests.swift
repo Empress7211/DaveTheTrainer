@@ -4,6 +4,32 @@ import TrainerCore
 
 @MainActor
 final class PlayerPathContractTests: XCTestCase {
+    func testV106756OptInIsSessionOnlyAndBlocksResourceBeforeAttach() async throws {
+        let install = GameInstall(
+            outerAppURL: URL(fileURLWithPath: "/Applications/DaveTheDiver.app", isDirectory: true),
+            innerAppURL: URL(fileURLWithPath: KnownGameBuild.v106756.executablePath).deletingLastPathComponent(),
+            signature: KnownGameBuild.v106756
+        )
+        let memory = RecordingMemoryAccess()
+        let store = AppStore(dependencies: .test(install: install, memoryAccess: memory))
+        let gold = try XCTUnwrap(SimpleTrainerOptions.currencies.first { $0.id == "money" })
+        XCTAssertTrue(store.showsExperimentalControls)
+        XCTAssertFalse(store.allowExperimentalFeatures)
+        XCTAssertTrue(store.unsupportedReason(for: gold)?.contains("实验功能") == true)
+        let success = await withCheckedContinuation { continuation in
+            store.applySimpleOption(SimpleTrainerActionRequest(option: gold, isEnabled: true, valueText: "1")) {
+                continuation.resume(returning: $0)
+            }
+        }
+        XCTAssertFalse(success)
+        XCTAssertEqual(memory.attachCount, 0)
+        store.allowExperimentalFeatures = true
+        XCTAssertNil(store.unsupportedReason(for: gold))
+        let fresh = AppStore(dependencies: .test(install: install))
+        XCTAssertFalse(fresh.allowExperimentalFeatures)
+        XCTAssertNotNil(fresh.unsupportedReason(for: gold))
+    }
+
     func testDefaultPlayerViewDoesNotExposeDeveloperStaticFeatureControls() throws {
         let viewSource = try Self.readProjectFile("Sources/DaveTrainerApp/Views/SimpleTrainerView.swift")
 

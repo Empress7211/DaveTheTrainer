@@ -76,7 +76,14 @@ public final class MachMemoryAccess: MemoryAccess {
         var task = mach_port_name_t()
         let result = dt_task_for_pid(process.pid, &task)
         guard result == KERN_SUCCESS else {
-            throw TrainerError.permissionDenied("task_for_pid(\(process.pid)) failed: \(machError(result))")
+            throw TrainerError.permissionDenied(MachAttachDiagnostics.failureDetail(
+                pid: process.pid,
+                machError: machError(result),
+                isAdministrator: geteuid() == 0,
+                targetPolicy: process.pid > 0
+                    ? MachAttachDiagnostics.targetPolicy(executablePath: process.executablePath)
+                    : .unavailable
+            ))
         }
         return MemorySession(task: task, process: process, ownsPort: true)
     }

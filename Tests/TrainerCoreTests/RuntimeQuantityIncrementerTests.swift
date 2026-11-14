@@ -2,6 +2,37 @@ import XCTest
 @testable import TrainerCore
 
 final class RuntimeQuantityIncrementerTests: XCTestCase {
+    func testV106756CurrenciesAndBothChefFlamesUseNewSaveLayout() throws {
+        for resourceID in ["gold", "bei", "jungleGold", "artisan"] {
+            let fixture = StaticSaveChainFixture(layout: .v106756)
+            let session = InMemoryRuntimeQuantitySession(segments: fixture.segments)
+            let result = try RuntimeQuantityIncrementer(moduleResolver: fixture.moduleResolver, layout: .v106756).increment(
+                RuntimeQuantityIncrementRequest(featureID: resourceID, delta: 99), session: session
+            )
+            func quantity(_ offset: UInt64) throws -> Int32? {
+                ObscuredInt32Value(data: try session.read(MemoryReadRequest(address: fixture.playerInfoAddress + offset, size: 0x14)))?.value
+            }
+            XCTAssertEqual(try quantity(0x10), resourceID == "gold" ? 1_099 : 1_000)
+            XCTAssertEqual(try quantity(0x24), resourceID == "bei" ? 2_099 : 2_000)
+            XCTAssertEqual(try quantity(0x38), resourceID == "artisan" ? 399 : 300)
+            XCTAssertEqual(try session.readInt32(address: fixture.jungleGoldAddress), resourceID == "jungleGold" ? 876 : 777)
+            XCTAssertEqual(try session.readInt32(address: fixture.jungleChefFlameAddress), resourceID == "artisan" ? 129 : 30)
+            XCTAssertEqual(result.updatedAddressCount, resourceID == "artisan" ? 2 : 1)
+            XCTAssertEqual(session.regionsCallCount, 0)
+        }
+    }
+
+    func testV106756LayoutCannotFallBackToOldSingletonSlots() throws {
+        let fixture = StaticSaveChainFixture()
+        let session = InMemoryRuntimeQuantitySession(segments: fixture.segments)
+        XCTAssertThrowsError(try RuntimeQuantityIncrementer(moduleResolver: fixture.moduleResolver, layout: .v106756).increment(
+            RuntimeQuantityIncrementRequest(featureID: "gold", delta: 99), session: session
+        ))
+        let stored = try session.read(MemoryReadRequest(address: fixture.playerInfoAddress + 0x10, size: 0x14))
+        XCTAssertEqual(ObscuredInt32Value(data: stored)?.value, 1_000)
+        XCTAssertEqual(session.regionsCallCount, 0)
+    }
+
     func testObscuredInt32DecodesAndReencodesWithExistingKey() throws {
         let original = ObscuredInt32Value(currentCryptoKey: 0x1357_2468, value: 12_345, fakeValueActive: true)
         let decoded = try XCTUnwrap(ObscuredInt32Value(data: original.data))
@@ -391,11 +422,11 @@ private struct StaticSaveChainFixture {
     let moduleResolver: StaticModuleResolver
     let segments: [UInt64: Data]
 
-    init() {
+    init(layout: DaveRuntimeLayout = .v106675) {
         let moduleBaseAddress = UInt64(0x1_0000_0000)
         let playerInfoAddress = UInt64(0x8_0000_0000)
         let replacementPlayerInfoAddress = UInt64(0x8_1000_0000)
-        let methodVariableAddress = moduleBaseAddress + 0x98D7948
+        let methodVariableAddress = moduleBaseAddress + layout.saveSystemInstanceMethodRVA
         let typeInfoVariableAddress = moduleBaseAddress + 0x987ECF8
         let methodInfoAddress = UInt64(0x2_0000_0000)
         let genericContextAddress = UInt64(0x3_0000_0000)
@@ -431,7 +462,8 @@ private struct StaticSaveChainFixture {
             gameDataManagerAddress: Self.gameDataManagerData(saveDataAddress: saveDataAddress),
             saveDataAddress: Self.saveDataObjectData(
                 playerInfoAddress: playerInfoAddress,
-                jungleSaveDataAddress: jungleSaveDataAddress
+                jungleSaveDataAddress: jungleSaveDataAddress,
+                layout: layout
             ),
             playerInfoAddress: Self.playerInfoSaveData(),
             replacementPlayerInfoAddress: Self.playerInfoSaveData(gold: 5_000, bei: 6_000, chefFlame: 700),
@@ -493,10 +525,10 @@ private struct StaticSaveChainFixture {
         return data
     }
 
-    private static func saveDataObjectData(playerInfoAddress: UInt64, jungleSaveDataAddress: UInt64) -> Data {
-        var data = runtimeObjectData(count: 0x2B0)
-        data.writeUInt64(playerInfoAddress, at: 0x220)
-        data.writeUInt64(jungleSaveDataAddress, at: 0x2A8)
+    private static func saveDataObjectData(playerInfoAddress: UInt64, jungleSaveDataAddress: UInt64, layout: DaveRuntimeLayout) -> Data {
+        var data = runtimeObjectData(count: Int(layout.saveDataJungleOffset) + 8)
+        data.writeUInt64(playerInfoAddress, at: Int(layout.saveDataPlayerInfoOffset))
+        data.writeUInt64(jungleSaveDataAddress, at: Int(layout.saveDataJungleOffset))
         return data
     }
 

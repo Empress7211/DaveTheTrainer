@@ -2,6 +2,41 @@ import XCTest
 @testable import TrainerCore
 
 final class IngredientsInventoryIncrementerTests: XCTestCase {
+    func testV106756InventoryUpdatesRuntimeAndSaveThroughNewDictionaryOffset() throws {
+        for scope in [IngredientsInventoryScope.all, .fish, .vegetable] {
+            let fixture = StaticIngredientsStorageFixture(layout: .v106756)
+            let session = InMemoryIngredientsInventorySession(segments: fixture.segments)
+            let result = try IngredientsInventoryIncrementer(moduleResolver: fixture.moduleResolver, layout: .v106756).increment(
+                IngredientsInventoryIncrementRequest(scope: scope, delta: 9), session: session
+            )
+            let fishCount: Int32 = scope == .vegetable ? 10 : 19
+            let vegetableCount: Int32 = scope == .fish ? 20 : 29
+            XCTAssertEqual(try session.readInt32(address: fixture.fishCountAddress), fishCount)
+            XCTAssertEqual(try session.readInt32(address: fixture.vegetableCountAddress), vegetableCount)
+            XCTAssertEqual(try session.readObscuredInt32(address: fixture.fishSaveCountAddress), fishCount)
+            XCTAssertEqual(try session.readObscuredInt32(address: fixture.vegetableSaveCountAddress), vegetableCount)
+            XCTAssertEqual(result.updatedItemCount, scope == .all ? 2 : 1)
+            XCTAssertEqual(try session.readByte(address: fixture.saveDirtyFlagAddress), 1)
+            XCTAssertEqual(session.regionsCallCount, 0)
+        }
+    }
+
+    func testV106756SeasoningAndUpgradeScopesKeepRuntimeAndSaveInSync() throws {
+        for (scope, type) in [(IngredientsInventoryScope.seasoning, Int32(3)), (.upgrade, Int32(4))] {
+            let fixture = StaticIngredientsStorageFixture(layout: .v106756, secondIngredientType: type)
+            let session = InMemoryIngredientsInventorySession(segments: fixture.segments)
+            let result = try IngredientsInventoryIncrementer(moduleResolver: fixture.moduleResolver, layout: .v106756).increment(
+                IngredientsInventoryIncrementRequest(scope: scope, delta: 9), session: session
+            )
+            XCTAssertEqual(result.updatedItemCount, 1)
+            XCTAssertEqual(try session.readInt32(address: fixture.fishCountAddress), 10)
+            XCTAssertEqual(try session.readObscuredInt32(address: fixture.fishSaveCountAddress), 10)
+            XCTAssertEqual(try session.readInt32(address: fixture.vegetableCountAddress), 29)
+            XCTAssertEqual(try session.readObscuredInt32(address: fixture.vegetableSaveCountAddress), 29)
+            XCTAssertEqual(session.regionsCallCount, 0)
+        }
+    }
+
     func testObjectScannerFindsVegetableIngredientsDataCandidate() {
         let baseAddress = UInt64(0x1_0000_0000)
         let objectOffset = 0x40
@@ -204,10 +239,10 @@ private struct StaticIngredientsStorageFixture {
     let vegetableSaveCountAddress: UInt64
     let saveDirtyFlagAddress: UInt64
 
-    init() {
+    init(layout: DaveRuntimeLayout = .v106675, secondIngredientType: Int32 = 2) {
         let moduleBaseAddress = UInt64(0x1_0000_0000)
-        let methodVariableAddress = moduleBaseAddress + 0x98D6E88
-        let saveMethodVariableAddress = moduleBaseAddress + 0x98D7948
+        let methodVariableAddress = moduleBaseAddress + layout.ingredientsInstanceMethodRVA
+        let saveMethodVariableAddress = moduleBaseAddress + layout.saveSystemInstanceMethodRVA
         let methodInfoAddress = UInt64(0x2_0000_0000)
         let saveMethodInfoAddress = UInt64(0x2_1000_0000)
         let genericContextAddress = UInt64(0x3_0000_0000)
@@ -265,7 +300,8 @@ private struct StaticIngredientsStorageFixture {
             gameDataManagerAddress: Self.gameDataManagerData(saveDataAddress: saveDataAddress),
             saveDataAddress: Self.saveDataObjectData(
                 playerInfoAddress: playerInfoAddress,
-                ingredientsSaveDictionaryAddress: ingredientsSaveDictionaryAddress
+                ingredientsSaveDictionaryAddress: ingredientsSaveDictionaryAddress,
+                layout: layout
             ),
             playerInfoAddress: Self.runtimeObjectData(count: 0x4C),
             ingredientsSaveDictionaryAddress: Self.saveDictionaryData(entriesArrayAddress: ingredientsSaveEntriesArrayAddress),
@@ -283,14 +319,14 @@ private struct StaticIngredientsStorageFixture {
             ),
             vegetableDataAddress: Self.ingredientsData(
                 id: 102,
-                type: 2,
+                type: secondIngredientType,
                 countsAddress: vegetableCountsAddress,
                 entityAddress: vegetableEntityAddress
             ),
             fishCountsAddress: Self.countsArrayData(count: 10),
             vegetableCountsAddress: Self.countsArrayData(count: 20),
             fishEntityAddress: Self.entityData(type: 0),
-            vegetableEntityAddress: Self.entityData(type: 2)
+            vegetableEntityAddress: Self.entityData(type: secondIngredientType)
         ]
     }
 
@@ -342,10 +378,10 @@ private struct StaticIngredientsStorageFixture {
         return data
     }
 
-    private static func saveDataObjectData(playerInfoAddress: UInt64, ingredientsSaveDictionaryAddress: UInt64) -> Data {
-        var data = runtimeObjectData(count: 0x228)
-        data.writeUInt64(ingredientsSaveDictionaryAddress, at: 0x100)
-        data.writeUInt64(playerInfoAddress, at: 0x220)
+    private static func saveDataObjectData(playerInfoAddress: UInt64, ingredientsSaveDictionaryAddress: UInt64, layout: DaveRuntimeLayout) -> Data {
+        var data = runtimeObjectData(count: Int(layout.saveDataPlayerInfoOffset) + 8)
+        data.writeUInt64(ingredientsSaveDictionaryAddress, at: Int(layout.saveDataIngredientsDictionaryOffset))
+        data.writeUInt64(playerInfoAddress, at: Int(layout.saveDataPlayerInfoOffset))
         return data
     }
 

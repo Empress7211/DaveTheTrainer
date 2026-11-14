@@ -1,7 +1,5 @@
 import Foundation
 
-private let jungleIngredientsSaveSystemSingletonInstanceMethodRVA = UInt64(0x98D7948)
-private let jungleIngredientsSaveSystemSingletonHasInstanceMethodRVA = UInt64(0x98D7950)
 private let jungleIngredientsRuntimeMethodGenericContextOffset = UInt64(0x20)
 private let jungleIngredientsRuntimeGenericClassContainerOffset = UInt64(0xC0)
 private let jungleIngredientsRuntimeGenericClassTypeOffset = UInt64(0x10)
@@ -9,10 +7,7 @@ private let jungleIngredientsClassStaticFieldsOffset = UInt64(0xB8)
 private let jungleIngredientsSingletonInstanceStaticFieldOffset = UInt64(0x0)
 private let jungleIngredientsSaveSystemGameDataManagerOffset = UInt64(0x50)
 private let jungleIngredientsGameDataManagerDataOffset = UInt64(0x50)
-private let jungleIngredientsSaveDataPlayerInfoOffset = UInt64(0x220)
-private let jungleIngredientsGameSaveJungleSaveDataOffset = UInt64(0x2A8)
 private let jungleIngredientsSaveDictionaryOffset = UInt64(0xA8)
-private let jungleVillageItemsSaveDictionaryOffset = UInt64(0x150)
 private let jungleIngredientsDictionaryEntriesOffset = UInt64(0x18)
 private let jungleIngredientsDictionaryCountOffset = UInt64(0x20)
 private let jungleIngredientsDictionaryEntryArrayDataOffset = 0x20
@@ -73,12 +68,17 @@ public protocol JungleIngredientsInventoryMemorySession: ModuleMemorySession {
 extension MemorySession: JungleIngredientsInventoryMemorySession {}
 
 public final class JungleIngredientsInventoryIncrementer {
+    private let layout: DaveRuntimeLayout
     private let moduleResolver: GameAssemblyResolving
     private var cachedGameAssembly: CachedGameAssembly?
     private var cachedDictionaryAddresses: [RuntimeAddressCacheKey: UInt64] = [:]
 
-    public init(moduleResolver: GameAssemblyResolving = MachOModuleResolver()) {
+    public init(
+        moduleResolver: GameAssemblyResolving = MachOModuleResolver(),
+        layout: DaveRuntimeLayout = .v106675
+    ) {
         self.moduleResolver = moduleResolver
+        self.layout = layout
     }
 
     public func clearCachedAddresses() {
@@ -114,7 +114,7 @@ public final class JungleIngredientsInventoryIncrementer {
         let module = try resolveGameAssembly(session: session)
         let gameSave = try resolveGameSave(module: module, session: session)
         let jungleSaveData = try readAlignedPointer(
-            address: gameSave + jungleIngredientsGameSaveJungleSaveDataOffset,
+            address: gameSave + layout.saveDataJungleOffset,
             context: "GameSave.SaveDataJungle",
             session: session
         )
@@ -135,7 +135,7 @@ public final class JungleIngredientsInventoryIncrementer {
         if scope.includesVillageItems {
             let villageItemsDictionary = try resolveJungleSaveDictionary(
                 cacheKey: makeCacheKey(featureID: "jungle.villageItems.dictionary", module: module, session: session),
-                address: jungleSaveData + jungleVillageItemsSaveDictionaryOffset,
+                address: jungleSaveData + layout.jungleVillageItemsDictionaryOffset,
                 descriptor: .villageItems,
                 session: session
             )
@@ -196,8 +196,8 @@ public final class JungleIngredientsInventoryIncrementer {
     ) throws -> UInt64 {
         var failures: [String] = []
         let methodRVAs = [
-            jungleIngredientsSaveSystemSingletonInstanceMethodRVA,
-            jungleIngredientsSaveSystemSingletonHasInstanceMethodRVA
+            layout.saveSystemInstanceMethodRVA,
+            layout.saveSystemHasInstanceMethodRVA
         ]
         for methodRVA in methodRVAs {
             do {
@@ -295,7 +295,7 @@ public final class JungleIngredientsInventoryIncrementer {
     private func validateGameSave(address: UInt64, session: JungleIngredientsInventoryMemorySession) throws {
         try validateRuntimeObjectHeader(address: address, session: session)
         _ = try readAlignedPointer(
-            address: address + jungleIngredientsSaveDataPlayerInfoOffset,
+            address: address + layout.saveDataPlayerInfoOffset,
             context: "GameSave.playerInfo",
             session: session
         )
@@ -307,6 +307,11 @@ public final class JungleIngredientsInventoryIncrementer {
         session: JungleIngredientsInventoryMemorySession
     ) throws {
         try validateRuntimeObjectHeader(address: address, session: session)
+        // An empty managed Dictionary may have no allocated entries array.
+        let dictionary = JungleSaveDictionary(address: address, descriptor: descriptor)
+        guard try readDictionaryEntryCount(dictionary: dictionary, session: session) > 0 else {
+            return
+        }
         _ = try readAlignedPointer(
             address: address + jungleIngredientsDictionaryEntriesOffset,
             context: "\(descriptor.context).entries",
